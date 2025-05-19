@@ -12,7 +12,7 @@ if "location_history" not in st.session_state:
     st.session_state.location_history = []  # 履歴 = [(name, lat, lon), ...]
 
 st.title("🌾 出穂日予測アプリ")
-st.markdown("気象データとDVRモデルに基づいて、入力した地点の出穂日を予測します。")
+st.markdown("気象データとDVRモデルに基づいて、地点の出穂日を予測します。")
 
 # --- 入力: 新しい地点の登録 ---
 st.subheader("📍 地点の入力")
@@ -50,34 +50,44 @@ dvs_start = st.number_input("初期DVS値", value=0.1)
 st.subheader("📅 期間設定")
 start_date = st.date_input("移植日（開始日）", value=date(2024, 5, 20))
 end_date = st.date_input("予測終了日", value=date(2024, 9, 30))
-date_range = [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
 
 # --- 出穂日予測ボタン ---
 if st.button("🌾 出穂日を予測する"):
     with st.spinner("気象データを取得中..."):
+        date_range = [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
         latlon_box = [lat, lat, lon, lon]
-        data, tim, _, _ = amd.GetMetData("TMP_mea", date_range, latlon_box)
-        Ta_series = data[:, 0, 0]
+
+        try:
+            data, tim, _, _ = amd.GetMetData("TMP_mea", date_range, latlon_box)
+        except Exception as e:
+            st.error(f"気象データの取得に失敗しました: {e}")
+            st.stop()
+
+        Ta_series = data[:, 0, 0]  # 1点の温度時系列
         para = [base_temp, acc_temp]
 
         DVS = dvs_start
         result = []
+        heading_day = None
         for i, Ta in enumerate(Ta_series):
             DVS += DVR(Ta, Para=para)
             result.append((i, float(Ta), DVS))
             if DVS > 1.0:
+                heading_day = tim[i]
                 break
 
-        if DVS <= 1.0:
-            st.warning("出穂に到達しませんでした（期間内でDVS < 1.0）")
+        # --- 結果の表示 ---
+        if heading_day:
+            st.success(f"📅 出穂日: {heading_day.strftime('%Y-%m-%d')}（{place_name}）")
         else:
-            st.success(f"📅 出穂日: {tim[i].strftime('%Y-%m-%d')}（{place_name}）")
-            st.line_chart([r[2] for r in result], use_container_width=True)
-            st.dataframe(
-                {
-                    "日目": [r[0] for r in result],
-                    "気温": [f"{r[1]:.1f}" for r in result],
-                    "DVS": [f"{r[2]:.3f}" for r in result]
-                },
-                use_container_width=True
-            )
+            st.warning("出穂に到達しませんでした（期間内でDVS < 1.0）")
+
+        st.line_chart([r[2] for r in result], use_container_width=True)
+        st.dataframe(
+            {
+                "日目": [r[0] for r in result],
+                "気温": [f"{r[1]:.1f}" for r in result],
+                "DVS": [f"{r[2]:.3f}" for r in result]
+            },
+            use_container_width=True
+        )
