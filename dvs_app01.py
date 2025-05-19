@@ -1,53 +1,63 @@
 import streamlit as st
 import numpy as np
 import AMD_Tools4 as amd
+from datetime import date
 
-# DVR関数（積算温度モデル）
+# --- DVRモデル ---
 def DVR(Ta, Para=[10.0, 1050.0]):
     return (Ta - Para[0]) / Para[1] if Ta > Para[0] else 0.0
 
-# --- タイトル ---
-st.title("出穂日予測アプリ")
-st.markdown("気温データと発育速度モデル（DVR）に基づいて出穂日を予測します。")
-
-# --- 初期値 ---
-default_para = [10.0, 1050.0]
-
-# --- 緯度経度履歴管理 ---
+# --- セッションステートに履歴を保存 ---
 if "location_history" not in st.session_state:
-    st.session_state.location_history = []
+    st.session_state.location_history = []  # 履歴 = [(name, lat, lon), ...]
 
-# --- 緯度経度の入力 ---
-st.subheader("地点情報")
-col1, col2 = st.columns(2)
-lat = col1.number_input("緯度 (latitude)", value=35.802075, format="%.6f")
-lon = col2.number_input("経度 (longitude)", value=137.930848, format="%.6f")
+st.title("🌾 出穂日予測アプリ")
+st.markdown("気象データとDVRモデルに基づいて、入力した地点の出穂日を予測します。")
 
-# --- 緯度経度履歴に追加 ---
-new_location = (round(lat, 6), round(lon, 6))
-if new_location not in st.session_state.location_history:
-    st.session_state.location_history.append(new_location)
+# --- 入力: 新しい地点の登録 ---
+st.subheader("📍 地点の入力")
+with st.form(key="location_form"):
+    place_name = st.text_input("地点名（例: 松本圃場）", value="圃場A")
+    lat = st.number_input("緯度 (latitude)", format="%.6f", value=35.802075)
+    lon = st.number_input("経度 (longitude)", format="%.6f", value=137.930848)
+    submitted = st.form_submit_button("この地点を登録して使用")
 
-# --- 履歴から選択 ---
-selected = st.selectbox("過去の地点から選択", st.session_state.location_history)
-if st.button("この地点を使用"):
-    lat, lon = selected
+    if submitted:
+        new_entry = (place_name.strip(), round(lat, 6), round(lon, 6))
+        if new_entry not in st.session_state.location_history:
+            st.session_state.location_history.append(new_entry)
+        st.session_state.selected_location = new_entry
 
-# --- パラメータ入力 ---
-st.subheader("モデルパラメータ")
-base_temp = st.number_input("基準温度（℃）", value=default_para[0])
-acc_temp = st.number_input("出穂到達積算温度（℃・日）", value=default_para[1])
+# --- 過去の地点履歴から選択 ---
+st.subheader("📚 過去の地点から選択")
+if st.session_state.location_history:
+    selected_label = st.selectbox(
+        "地点を選択",
+        options=[f"{name} ({lat}, {lon})" for name, lat, lon in st.session_state.location_history]
+    )
+    selected_index = [f"{n} ({la}, {lo})" for n, la, lo in st.session_state.location_history].index(selected_label)
+    place_name, lat, lon = st.session_state.location_history[selected_index]
+else:
+    st.info("まだ地点が登録されていません。上で新しい地点を入力してください。")
+
+# --- パラメータ設定 ---
+st.subheader("⚙️ モデル設定")
+base_temp = st.number_input("基準温度（℃）", value=10.0)
+acc_temp = st.number_input("出穂到達積算温度（℃・日）", value=1050.0)
 dvs_start = st.number_input("初期DVS値", value=0.1)
 
-# --- 期間の指定（今年の想定） ---
-date_range = ['2024-05-20', '2024-09-30']
-latlon_box = [lat, lat, lon, lon]
+# --- 移植日と予測終了日 ---
+st.subheader("📅 期間設定")
+start_date = st.date_input("移植日（開始日）", value=date(2024, 5, 20))
+end_date = st.date_input("予測終了日", value=date(2024, 9, 30))
+date_range = [start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")]
 
-# --- 気象データの取得とDVS計算 ---
-if st.button("出穂日を予測"):
-    with st.spinner("データ取得中..."):
+# --- 出穂日予測ボタン ---
+if st.button("🌾 出穂日を予測する"):
+    with st.spinner("気象データを取得中..."):
+        latlon_box = [lat, lat, lon, lon]
         data, tim, _, _ = amd.GetMetData("TMP_mea", date_range, latlon_box)
-        Ta_series = data[:, 0, 0]  # 日平均気温の時系列
+        Ta_series = data[:, 0, 0]
         para = [base_temp, acc_temp]
 
         DVS = dvs_start
@@ -58,14 +68,16 @@ if st.button("出穂日を予測"):
             if DVS > 1.0:
                 break
 
-        # --- 結果の表示 ---
-        st.success(f"出穂日: {tim[i].strftime('%Y-%m-%d')}")
-        st.line_chart([r[2] for r in result], use_container_width=True)
-        st.dataframe(
-            {
-                "日目": [r[0] for r in result],
-                "気温": [f"{r[1]:.1f}" for r in result],
-                "DVS": [f"{r[2]:.3f}" for r in result]
-            },
-            use_container_width=True
-        )
+        if DVS <= 1.0:
+            st.warning("出穂に到達しませんでした（期間内でDVS < 1.0）")
+        else:
+            st.success(f"📅 出穂日: {tim[i].strftime('%Y-%m-%d')}（{place_name}）")
+            st.line_chart([r[2] for r in result], use_container_width=True)
+            st.dataframe(
+                {
+                    "日目": [r[0] for r in result],
+                    "気温": [f"{r[1]:.1f}" for r in result],
+                    "DVS": [f"{r[2]:.3f}" for r in result]
+                },
+                use_container_width=True
+            )
