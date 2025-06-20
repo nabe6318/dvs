@@ -43,9 +43,9 @@ with col3:
 st.subheader("📅 期間の設定")
 col1, col2 = st.columns(2)
 with col1:
-    start_date = st.date_input("移植日（開始日）", value=date(2024, 5, 20))
+    start_date = st.date_input("移植日（開始日）", value=date(2025, 5, 15))
 with col2:
-    end_date = st.date_input("予測終了日", value=date(2024, 9, 30))
+    end_date = st.date_input("予測終了日", value=date(2025, 9, 30))
 
 # --- 出穂日予測実行 ---
 if st.button("🌾 出穂日を予測する"):
